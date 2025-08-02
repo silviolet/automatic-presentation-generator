@@ -53,6 +53,19 @@ export default function RootLayout({
 
         {/* Main content */}
         <main className="min-h-screen bg-blue-50 text-gray-900 font-sans">{children}</main>
+        {/* Footer */}
+        <footer className="bg-blue-50 border-t border-blue-100">
+          <div className="max-w-6xl mx-auto px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-gray-600">
+            <div className="text-center md:text-left">
+              <p>© {new Date().getFullYear()} SlideNarrator AI. All rights reserved.</p>
+            </div>
+            <div className="flex gap-4">
+              <a href="/privacy" className="hover:text-blue-600 transition">Privacy</a>
+              <a href="/terms" className="hover:text-blue-600 transition">Terms</a>
+              <a href="mailto:support@slidenarrator.ai" className="hover:text-blue-600 transition">Contact</a>
+            </div>
+          </div>
+        </footer>
       </body>
     </html>
   );
