@@ -7,13 +7,16 @@ export default function GeneratePage() {
   const [profiles, setProfiles] = useState(["Default profile"]);
   const [model, setModel] = useState("F5-TTS");
   const [slides, setSlides] = useState<File | null>(null);
-  const [script, setScript] = useState("");
+  const [scriptFile, setScriptFile] = useState<File | null>(null);
+
   const [generateScript, setGenerateScript] = useState(false);
   const [scriptGenerator, setScriptGenerator] = useState("Gemma");
   const [referenceAudio, setReferenceAudio] = useState<File | null>(null);
   const [recording, setRecording] = useState(false);
   const [subtitles, setSubtitles] = useState(false);
   const [speechSpeed, setSpeechSpeed] = useState(1);
+  const [email, setEmail] = useState("");
+
 
   const handleAddProfile = () => {
     const newProfile = prompt("Enter new profile name:");
@@ -40,7 +43,86 @@ export default function GeneratePage() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Submit logic here
+
+    // Simple email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+
+    // Additional checks for required files
+    if (!slides) {
+      alert("Please select slides.");
+      return;
+    }
+
+    if (!generateScript && !referenceAudio) {
+      alert("Please select reference audio.");
+      return;
+    }
+
+    if (!generateScript && !scriptFile) {
+      alert("Please upload a script file.");
+      return;
+    }
+
+    alert(`Outputs will be sent to: ${email}`);
+
+    // Prepare form data
+    const formData = new FormData();
+    // Always required
+    formData.append("profile", profile);
+    formData.append("model", model);
+    formData.append("generateScript", generateScript.toString());
+    formData.append("email", email);
+    formData.append("slides", slides);
+
+    // Optional field – only add if value exists
+    if (scriptGenerator) {
+      formData.append("scriptGenerator", scriptGenerator);
+    }
+
+    // Script handling
+    if (generateScript) {
+      // Do not append scriptFile, referenceAudio, subtitles, speechSpeed
+      // They're optional or not relevant in this mode
+    } else {
+      // Script file required
+      if (scriptFile) {
+        formData.append("scriptFile", scriptFile);
+      } else {
+        alert("Please upload a script file.");
+        return;
+      }
+
+      // Reference audio required
+      if (referenceAudio) {
+        formData.append("referenceAudio", referenceAudio);
+      } else {
+        alert("Please select reference audio.");
+        return;
+      }
+
+      // Only append these if relevant
+      formData.append("subtitles", subtitles.toString());
+      formData.append("speechSpeed", speechSpeed.toString());
+    }
+    for (const [key, value] of formData.entries()) {
+      console.log(`${key}:`, value);
+    }
+    fetch("http://localhost:8000/generate", {
+      method: "POST",
+      body: formData,
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        console.log("Backend response:", data);
+      })
+      .catch((err) => {
+        console.error(err);
+        alert("Failed to generate.");
+      });
   };
 
   return (
@@ -102,7 +184,6 @@ export default function GeneratePage() {
               className="border rounded px-3 py-2 w-full"
             />
           </div>
-
           <div className="flex items-center">
             <input
               type="checkbox"
@@ -115,60 +196,73 @@ export default function GeneratePage() {
 
           {!generateScript && (
             <div>
-              <label className="block font-semibold mb-1">Script *</label>
-              <textarea
-                value={script}
-                onChange={(e) => setScript(e.target.value)}
+              <label className="block font-semibold mb-1">Script File * (Use #ENDSLIDE# to denote slide end)</label>
+              <input
+                type="file"
+                accept=".txt"
+                onChange={(e) => setScriptFile(e.target.files?.[0] || null)}
                 className="border rounded px-3 py-2 w-full"
-                rows={4}
               />
             </div>
           )}
-
-          <div>
-            <label className="block font-semibold mb-1">Reference Speaker Audio *</label>
-            <div className="flex items-center gap-3">
-              <input
-                type="file"
-                accept="audio/*"
-                onChange={(e) => setReferenceAudio(e.target.files?.[0] || null)}
-                className="border rounded px-3 py-2 w-full"
-              />
-              <button
-                type="button"
-                onClick={handleRecord}
-                className={`px-4 py-2 rounded text-white ${recording ? "bg-red-600" : "bg-blue-600"}`}
-              >
-                {recording ? "Stop" : "Record"}
-              </button>
+          {!generateScript && (
+            <div>
+              <label className="block font-semibold mb-1">Reference Speaker Audio *</label>
+              <div className="flex items-center gap-3">
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={(e) => setReferenceAudio(e.target.files?.[0] || null)}
+                  className="border rounded px-3 py-2 w-full"
+                />
+                <button
+                  type="button"
+                  onClick={handleRecord}
+                  className={`px-4 py-2 rounded text-white ${recording ? "bg-red-600" : "bg-blue-600"}`}
+                >
+                  {recording ? "Stop" : "Record"}
+                </button>
+              </div>
             </div>
-          </div>
-          
+          )}
           <div>
-            <label className="block font-semibold mb-1">Subtitles</label>
-            <select
-              value={subtitles ? "Yes" : "No"}
-              onChange={(e) => setSubtitles(e.target.value === "Yes")}
-              className="border rounded px-3 py-2 w-full"
-            >
-              <option>No</option>
-              <option>Yes</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block font-semibold mb-1">Speech Speed</label>
+            <label className="block font-semibold mb-1">Email Address for Output</label>
             <input
-              type="number"
-              min="0.5"
-              max="2"
-              step="0.1"
-              value={speechSpeed}
-              onChange={(e) => setSpeechSpeed(parseFloat(e.target.value))}
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               className="border rounded px-3 py-2 w-full"
+              placeholder="you@example.com"
+              required
             />
           </div>
-
+          {!generateScript && (
+            <div>
+              <label className="block font-semibold mb-1">Subtitles</label>
+              <select
+                value={subtitles ? "Yes" : "No"}
+                onChange={(e) => setSubtitles(e.target.value === "Yes")}
+                className="border rounded px-3 py-2 w-full"
+              >
+                <option>No</option>
+                <option>Yes</option>
+              </select>
+            </div>
+          )}
+          {!generateScript && (
+            <div>
+              <label className="block font-semibold mb-1">Speech Speed</label>
+              <input
+                type="number"
+                min="0.5"
+                max="2"
+                step="0.1"
+                value={speechSpeed}
+                onChange={(e) => setSpeechSpeed(parseFloat(e.target.value))}
+                className="border rounded px-3 py-2 w-full"
+              />
+            </div>
+          )}
           <div className="pt-4 text-center">
             <button type="submit" className="bg-green-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-green-700 transition">
               Generate
