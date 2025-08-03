@@ -66,18 +66,32 @@ export default function GeneratePage() {
             </div>
           </div>
 
-          <div>
-            <label className="block font-semibold mb-1">Model *</label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              className="border rounded px-3 py-2 w-full"
-            >
-              <option>F5-TTS</option>
-              <option>OpenVoice</option>
-              <option>IndexTTS</option>
-            </select>
-          </div>
+          {!generateScript ? (
+            <div>
+              <label className="block font-semibold mb-1">Model *</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+              >
+                <option>F5-TTS</option>
+                <option>OpenVoice</option>
+                <option>IndexTTS</option>
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="block font-semibold mb-1">Model *</label>
+              <select
+                value={scriptGenerator}
+                onChange={(e) => setScriptGenerator(e.target.value)}
+                className="border rounded px-3 py-2 w-full"
+              >
+                <option>Gemma</option>
+                <option>OpenAI</option>
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block font-semibold mb-1">PowerPoint Slides *</label>
@@ -111,20 +125,6 @@ export default function GeneratePage() {
             </div>
           )}
 
-          {generateScript && (
-            <div>
-              <label className="block font-semibold mb-1">Script Generator</label>
-              <select
-                value={scriptGenerator}
-                onChange={(e) => setScriptGenerator(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
-              >
-                <option>Gemma</option>
-                <option>OpenAI</option>
-              </select>
-            </div>
-          )}
-
           <div>
             <label className="block font-semibold mb-1">Reference Speaker Audio *</label>
             <div className="flex items-center gap-3">
@@ -143,7 +143,7 @@ export default function GeneratePage() {
               </button>
             </div>
           </div>
-
+          
           <div>
             <label className="block font-semibold mb-1">Subtitles</label>
             <select
