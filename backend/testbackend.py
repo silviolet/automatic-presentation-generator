@@ -13,10 +13,14 @@ from transformers import pipeline
 from openai import OpenAI
 from typing import Optional
 from dotenv import load_dotenv
+import smtplib
+from email.message import EmailMessage
+import requests
 # === Init ===
 app = FastAPI()
 
 load_dotenv()
+# === Global Variables ===
 INDEXTTS_DIR = r"F:\index\index-tts"
 PROFILE_PATH = "profiles.json"
 LIBREOFFICE_PATH = r"C:\Program Files\LibreOffice\program\soffice.exe"
@@ -239,7 +243,13 @@ def process(job):
         concat_file = os.path.join(video_output_dir, "concat_list.txt")
         if os.path.exists(concat_file):
             os.remove(concat_file)
-
+        send_email_with_attachment(
+                to_email=job["email"],
+                subject="Your narrated video is ready!",
+                body="Attached is your generated lecture video.",
+                attachment_path=final_video_path
+            )
+        print(f"Sent video to {job['email']}")
     except Exception as e:
         print("Error" + str(e))
     finally:
@@ -325,7 +335,13 @@ def process_script(job):
             f.writelines(slides_script)
 
         print(f"Success: Script created: {script_path}")
-
+        send_email_with_attachment(
+                to_email=job["email"],
+                subject="Your lecture script is ready!",
+                body="Attached is your generated script.",
+                attachment_path=script_path
+            )
+        print(f"Sent script to {job['email']}")
     except Exception as e:
         print("Error" +  str(e))
     finally:
@@ -371,6 +387,22 @@ def create_file(file_path):
     )
     return result.id
 
+def send_email_with_attachment(to_email, subject, body, attachment_path):
+    msg = EmailMessage()
+    msg["From"] = os.getenv("GMAIL_USER")
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.set_content(body)
+
+    with open(attachment_path, "rb") as f:
+        data = f.read()
+        msg.add_attachment(data, maintype="video", subtype="mp4", filename=os.path.basename(attachment_path))
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        smtp.starttls()
+        smtp.login(os.getenv("GMAIL_USER"), os.getenv("GMAIL_PASS"))
+        smtp.send_message(msg)
+
 # === API Endpoint ===
 @app.post("/generate")
 async def generate_presentation(
@@ -389,6 +421,8 @@ async def generate_presentation(
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(UPLOAD_DIR, job_id)
     os.makedirs(job_dir, exist_ok=True)
+    ref_path = None
+    script_path = None
 
     slides_path = os.path.join(job_dir, slides.filename)
     if not generateScript:
@@ -398,7 +432,6 @@ async def generate_presentation(
         ref_path = os.path.join(job_dir, referenceAudio.filename)
         with open(ref_path, "wb") as f:
             f.write(await referenceAudio.read())
-    script_path = None
     if not generateScript:
         script_path = os.path.join(job_dir, scriptFile.filename)
         with open(script_path, "wb") as f:
