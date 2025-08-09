@@ -1,8 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect} from "react";
+import { useRouter } from "next/navigation";
+import firebase from "firebase/compat/app";
+import "firebase/compat/auth";
+
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET!,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
+};
 
 export default function GeneratePage() {
+  const router = useRouter();
+  const [authChecked, setAuthChecked] = useState(false);
   const [profile, setProfile] = useState("Default profile");
   const [profiles, setProfiles] = useState(["Default profile"]);
   const [model, setModel] = useState("F5-TTS");
@@ -16,8 +30,32 @@ export default function GeneratePage() {
   const [subtitles, setSubtitles] = useState(false);
   const [speechSpeed, setSpeechSpeed] = useState(1);
   const [email, setEmail] = useState("");
+  useEffect(() => {
+    // Ensure Firebase is initialized
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
 
+    // Check auth state
+    const unsubscribe = firebase.auth().onAuthStateChanged((user) => {
+      if (!user) {
+        router.push("/login"); // redirect to login
+      } else {
+        setAuthChecked(true); // allow page to render
+      }
+    });
 
+    return () => unsubscribe();
+  }, [router]);
+
+  // Prevent rendering form until auth is checked
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex justify-center items-center">
+        <p className="text-lg text-gray-500">Checking authentication...</p>
+      </div>
+    );
+  }
   const handleAddProfile = () => {
     const newProfile = prompt("Enter new profile name:");
     if (newProfile && !profiles.includes(newProfile)) {
