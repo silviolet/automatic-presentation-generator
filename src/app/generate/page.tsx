@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect} from "react";
+import { useState, useEffect, useRef} from "react";
 import { useRouter } from "next/navigation";
 import firebase from "firebase/compat/app";
 import "firebase/compat/auth";
@@ -16,6 +16,11 @@ const firebaseConfig = {
 
 export default function GeneratePage() {
   const router = useRouter();
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const stopTimerRef = useRef<number | null>(null);
+  const tickTimerRef = useRef<number | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number>(0);
   const [authChecked, setAuthChecked] = useState(false);
   const [profile, setProfile] = useState("Default profile");
   const [profiles, setProfiles] = useState(["Default profile"]);
@@ -42,12 +47,25 @@ export default function GeneratePage() {
         router.push("/login"); // redirect to login
       } else {
         setAuthChecked(true); // allow page to render
+        setEmail(user.email || ""); // pre-fill email if available
       }
     });
 
     return () => unsubscribe();
   }, [router]);
 
+  // optional: cleanup if user leaves page mid-recording
+  useEffect(() => {
+    return () => {
+      try {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+          mediaRecorderRef.current.stop();
+        }
+      } finally {
+        cleanupStream();
+      }
+    };
+  }, []);
   // Prevent rendering form until auth is checked
   if (!authChecked) {
     return (
@@ -56,6 +74,90 @@ export default function GeneratePage() {
       </div>
     );
   }
+  function getSupportedMimeType(): string {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/ogg;codecs=opus",
+      "audio/mp4" // some Safari versions
+    ];
+    for (const t of candidates) {
+      if (MediaRecorder.isTypeSupported?.(t)) return t;
+    }
+    return ""; // let browser pick
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      const mimeType = getSupportedMimeType();
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      mediaRecorderRef.current = mr;
+
+      const chunks: BlobPart[] = [];
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+
+      mr.onstop = () => {
+        const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+        const ext =
+          blob.type.includes("ogg") ? "ogg" :
+          blob.type.includes("mp4") ? "m4a" : "webm";
+        const file = new File([blob], `recording_${Date.now()}.${ext}`, { type: blob.type });
+
+        setReferenceAudio(file); // <-- your existing state
+        cleanupStream();
+        setRecording(false);
+        setSecondsLeft(0);
+      };
+
+      mr.start(); // start recording
+      setRecording(true);
+      setSecondsLeft(10);
+
+      // tick countdown
+      tickTimerRef.current = window.setInterval(() => {
+        setSecondsLeft((s) => {
+          const next = s - 1;
+          return next >= 0 ? next : 0;
+        });
+      }, 1000);
+
+      // hard stop at 10s
+      stopTimerRef.current = window.setTimeout(() => {
+        if (mr.state !== "inactive") mr.stop();
+      }, 10_000);
+    } catch (err) {
+      console.error("Mic error:", err);
+      alert("Could not access microphone.");
+      setRecording(false);
+      setSecondsLeft(0);
+      cleanupStream();
+    }
+  }
+
+  function stopRecordingEarly() {
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== "inactive") mr.stop();
+  }
+
+  function cleanupStream() {
+    if (tickTimerRef.current) {
+      clearInterval(tickTimerRef.current);
+      tickTimerRef.current = null;
+    }
+    if (stopTimerRef.current) {
+      clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    mediaRecorderRef.current = null;
+  }
+
   const handleAddProfile = () => {
     const newProfile = prompt("Enter new profile name:");
     if (newProfile && !profiles.includes(newProfile)) {
@@ -74,9 +176,12 @@ export default function GeneratePage() {
     alert(`Profile '${profile}' saved.`);
   };
 
-  const handleRecord = () => {
-    setRecording(!recording);
-    // Stub: implement recording logic here
+  const handleRecord = async () => {
+    if (recording) {
+      stopRecordingEarly();
+    } else {
+      await startRecording();
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -195,7 +300,7 @@ export default function GeneratePage() {
                 className="border rounded px-3 py-2 w-full"
               >
                 <option>F5-TTS</option>
-                <option>OpenVoice</option>
+                {/*<option>OpenVoice</option> don't use for the time being, low quality and buggy*/}
                 <option>IndexTTS</option>
               </select>
             </div>
@@ -256,9 +361,9 @@ export default function GeneratePage() {
                 <button
                   type="button"
                   onClick={handleRecord}
-                  className={`px-4 py-2 rounded text-white ${recording ? "bg-red-600" : "bg-blue-600"}`}
+                  className={`cursor-pointer px-4 py-2 rounded text-white ${recording ? "bg-red-600" : "bg-blue-600"}`}
                 >
-                  {recording ? "Stop" : "Record"}
+                  {recording ? `Stop (${secondsLeft || 0}s)` : "Record 10s"}
                 </button>
               </div>
             </div>

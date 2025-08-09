@@ -156,7 +156,9 @@ def process(job):
                     "--output", out_wav,
                     "--force"
                 ]
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                child_env = os.environ.copy()
+                child_env.pop("PYTHONHASHSEED", None)
+                result = subprocess.run(cmd, capture_output=True, text=True, env=child_env)
                 print("STDOUT:\n", result.stdout)
                 print("STDERR:", result.stderr)
                 if result.returncode != 0:
