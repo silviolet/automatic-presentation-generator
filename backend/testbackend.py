@@ -2,8 +2,11 @@ import os
 import uuid
 import threading
 import queue
-from fastapi import FastAPI, File, UploadFile, Form
+from fastapi import FastAPI, File, UploadFile, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from typing import Literal
+import mimetypes
 import fitz
 import subprocess
 import html
@@ -76,8 +79,9 @@ def process(job):
         reference_path = job["reference_path"]
         ppt_path = job["slides_path"]
         script_path = job["script_path"]
-        final_video_path = os.path.join("outputs", f"{job['id']}_output.mp4")
+        final_video_path = os.path.join("outputs", f"{job['email']}_output.mp4")
         user_speed=job["speech_speed"]
+        print("User speed:", user_speed)
         model = job["model"]
         if model == "OpenVoice":
             from openvoice import se_extractor
@@ -267,7 +271,7 @@ def process_script(job):
         ppt_path = job["slides_path"]
         openai_var = job["script_generator"] == "OpenAI"
 
-        script_path = os.path.join("output_images", f"{job['id']}_script.txt")
+        script_path = os.path.join("output_images", f"{job['email']}_script.txt")
 
         image_paths = convert_ppt_to_images(ppt_path, "output_images")
 
@@ -460,3 +464,49 @@ async def generate_presentation(
     job_queue.put(job_data)
     return {"status": "ok", "message": f"Job queued for {email}"}
 
+@app.get("/outputs")
+def get_outputs(email: str = Query(..., description="User email from frontend")):
+    print(f"Received request for email: {email}")
+
+    script_path = os.path.join("output_images", f"{email}_script.txt")
+    video_path = os.path.join("outputs", f"{email}_output.mp4")
+
+    def file_info(path):
+        if os.path.exists(path):
+            return {
+                "name": os.path.basename(path),
+                "size": os.path.getsize(path),
+                "modified": int(os.path.getmtime(path))
+            }
+        else:
+            return None
+
+    return {
+        "status": "ok",
+        "email_received": email,
+        "files": {
+            "script": file_info(script_path),
+            "video": file_info(video_path)
+        }
+    }
+
+def path_for(email: str, kind: Literal["script", "video"]) -> str:
+    if kind == "script":
+        return os.path.join("output_images", f"{email}_script.txt")
+    return os.path.join("outputs", f"{email}_output.mp4")
+
+@app.get("/download")
+def download_file(
+    email: str = Query(..., description="User email"),
+    file_type: Literal["script", "video"] = Query(..., description="script|video"),
+):
+    file_path = path_for(email, file_type)
+    if not os.path.isfile(file_path):
+        raise HTTPException(404, detail=f"{file_type.capitalize()} not found for {email}")
+
+    mime, _ = mimetypes.guess_type(file_path)
+    return FileResponse(
+        file_path,
+        media_type=mime or "application/octet-stream",
+        filename=os.path.basename(file_path),  # forces download
+    )

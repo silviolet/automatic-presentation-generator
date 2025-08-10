@@ -33,6 +33,8 @@ export default function GeneratePage() {
   const [referenceAudio, setReferenceAudio] = useState<File | null>(null);
   const [recording, setRecording] = useState(false);
   const [subtitles, setSubtitles] = useState(false);
+  const [scriptAvailable, setScriptAvailable] = useState(false);
+  const [lectureAvailable, setLectureAvailable] = useState(false);
   const [speechSpeed, setSpeechSpeed] = useState(1);
   const [email, setEmail] = useState("");
   useEffect(() => {
@@ -66,6 +68,29 @@ export default function GeneratePage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!authChecked || !email) return;
+
+    fetch(`http://localhost:8000/outputs?email=${encodeURIComponent(email)}`)
+      .then(res => res.json())
+      .then(data => {
+        if(!data){
+          setScriptAvailable(false);
+          setLectureAvailable(false);
+        }
+        else {
+          setScriptAvailable(data.files.script != null);
+          setLectureAvailable(data.files.video != null);
+          console.log(data.files.script != null, data.files.video != null);
+        }
+        console.log("Backend response:", data);
+      })
+      .catch(err => {
+        console.error("Error fetching outputs:", err);
+      });
+  }, [authChecked, email]);
+  
   // Prevent rendering form until auth is checked
   if (!authChecked) {
     return (
@@ -74,6 +99,7 @@ export default function GeneratePage() {
       </div>
     );
   }
+
   function getSupportedMimeType(): string {
     const candidates = [
       "audio/webm;codecs=opus",
@@ -410,6 +436,27 @@ export default function GeneratePage() {
             <button type="submit" className="bg-green-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-green-700 transition">
               Generate
             </button>
+          </div>
+          <label className="block font-semibold mb-1">Downloads</label>
+
+          <div className="flex justify-between w-full">
+            {scriptAvailable && (
+              <a
+                href={`http://localhost:8000/download?email=${encodeURIComponent(email)}&file_type=script`}
+                className="bg-blue-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-blue-700 transition"
+              >
+                Download Script
+              </a>
+            )}
+
+            {lectureAvailable && (
+              <a
+                href={`http://localhost:8000/download?email=${encodeURIComponent(email)}&file_type=video`}
+                className="bg-blue-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-blue-700 transition"
+              >
+                Download Lecture
+              </a>
+            )}
           </div>
         </form>
       </div>
