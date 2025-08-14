@@ -27,7 +27,7 @@ export default function GeneratePage() {
   const [model, setModel] = useState("F5-TTS");
   const [slides, setSlides] = useState<File | null>(null);
   const [scriptFile, setScriptFile] = useState<File | null>(null);
-
+  const [idToken, setIdToken] = useState<string | null>(null);
   const [generateScript, setGenerateScript] = useState(false);
   const [scriptGenerator, setScriptGenerator] = useState("Gemma");
   const [referenceAudio, setReferenceAudio] = useState<File | null>(null);
@@ -50,6 +50,9 @@ export default function GeneratePage() {
       } else {
         setAuthChecked(true); // allow page to render
         setEmail(user.email || ""); // pre-fill email if available
+        user.getIdToken().then(setIdToken).catch(err => {
+          console.error("Failed to get ID token:", err);
+          setIdToken(null);});
       }
     });
 
@@ -72,7 +75,9 @@ export default function GeneratePage() {
   useEffect(() => {
     if (!authChecked || !email) return;
 
-    fetch(`http://localhost:8000/outputs?email=${encodeURIComponent(email)}`)
+    fetch(`http://localhost:8000/outputs?email=${encodeURIComponent(email)}`, {
+    headers: { Authorization: `Bearer ${idToken}` }
+      })
       .then(res => res.json())
       .then(data => {
         if(!data){
@@ -184,24 +189,6 @@ export default function GeneratePage() {
     mediaRecorderRef.current = null;
   }
 
-  const handleAddProfile = () => {
-    const newProfile = prompt("Enter new profile name:");
-    if (newProfile && !profiles.includes(newProfile)) {
-      setProfiles([...profiles, newProfile]);
-      setProfile(newProfile);
-    }
-  };
-
-  const handleDeleteProfile = () => {
-    if (profile === "Default profile") return;
-    setProfiles(profiles.filter((p) => p !== profile));
-    setProfile("Default profile");
-  };
-
-  const handleSaveProfile = () => {
-    alert(`Profile '${profile}' saved.`);
-  };
-
   const handleRecord = async () => {
     if (recording) {
       stopRecordingEarly();
@@ -209,7 +196,24 @@ export default function GeneratePage() {
       await startRecording();
     }
   };
-
+  async function download(fileType: "script" | "video") {
+    if (!idToken) return;
+    const url = `http://localhost:8000/download?email=${encodeURIComponent(email)}&file_type=${fileType}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+    if (!res.ok) {
+      console.error("Download failed:", await res.text());
+      return;
+    }
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = fileType === "script" ? `${email}_script.txt` : `${email}_output.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -282,6 +286,7 @@ export default function GeneratePage() {
     }
     fetch("http://localhost:8000/generate", {
       method: "POST",
+      headers: { Authorization: `Bearer ${idToken ?? ""}` },
       body: formData,
     })
       .then((res) => res.json())
@@ -293,30 +298,12 @@ export default function GeneratePage() {
         alert("Failed to generate.");
       });
   };
-
+  
   return (
     <section className="py-16 px-4 bg-blue-50">
       <div className="max-w-4xl mx-auto p-8 bg-white shadow-xl rounded-2xl border border-blue-100">
         <h1 className="text-4xl font-bold mb-6 text-center text-blue-600">Generate Presentation</h1>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block font-semibold mb-1">Profile *</label>
-            <div className="flex flex-wrap gap-2">
-              <select
-                value={profile}
-                onChange={(e) => setProfile(e.target.value)}
-                className="border rounded px-3 py-2 flex-grow"
-              >
-                {profiles.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-              <button type="button" onClick={handleAddProfile} className="bg-blue-500 text-white px-3 py-1 rounded">Add</button>
-              <button type="button" onClick={handleDeleteProfile} className="bg-red-500 text-white px-3 py-1 rounded">Delete</button>
-              <button type="button" onClick={handleSaveProfile} className="bg-green-600 text-white px-3 py-1 rounded">Save</button>
-            </div>
-          </div>
-
           {!generateScript ? (
             <div>
               <label className="block font-semibold mb-1">Model *</label>
@@ -387,24 +374,13 @@ export default function GeneratePage() {
                 <button
                   type="button"
                   onClick={handleRecord}
-                  className={`cursor-pointer px-4 py-2 rounded text-white ${recording ? "bg-red-600" : "bg-blue-600"}`}
+                  className={`cursor-pointer px-4 py-2 rounded text-white ${recording ? "bg-red-600 hover:bg-red-700 transition" : "bg-blue-600 hover:bg-blue-700 transition"}`}
                 >
                   {recording ? `Stop (${secondsLeft || 0}s)` : "Record 10s"}
                 </button>
               </div>
             </div>
           )}
-          <div>
-            <label className="block font-semibold mb-1">Email Address for Output</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="border rounded px-3 py-2 w-full"
-              placeholder="you@example.com"
-              required
-            />
-          </div>
           {!generateScript && (
             <div>
               <label className="block font-semibold mb-1">Subtitles</label>
@@ -433,7 +409,7 @@ export default function GeneratePage() {
             </div>
           )}
           <div className="pt-4 text-center">
-            <button type="submit" className="bg-green-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-green-700 transition">
+            <button type="submit" className="cursor-pointer bg-green-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-green-700 transition">
               Generate
             </button>
           </div>
@@ -441,21 +417,22 @@ export default function GeneratePage() {
 
           <div className="flex justify-between w-full">
             {scriptAvailable && (
-              <a
-                href={`http://localhost:8000/download?email=${encodeURIComponent(email)}&file_type=script`}
-                className="bg-blue-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-blue-700 transition"
+              <button
+                type="button"
+                onClick={() => download("script")}
+                className="cursor-pointer bg-blue-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-blue-700 transition"
               >
                 Download Script
-              </a>
+              </button>
             )}
-
             {lectureAvailable && (
-              <a
-                href={`http://localhost:8000/download?email=${encodeURIComponent(email)}&file_type=video`}
-                className="bg-blue-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-blue-700 transition"
+              <button
+                type="button"
+                onClick={() => download("video")}
+                className="cursor-pointer bg-blue-600 text-white px-8 py-3 rounded text-lg font-semibold shadow hover:bg-blue-700 transition"
               >
                 Download Lecture
-              </a>
+              </button>
             )}
           </div>
         </form>
