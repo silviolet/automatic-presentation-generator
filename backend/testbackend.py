@@ -2,9 +2,11 @@ import os
 import uuid
 import threading
 import queue
-from fastapi import FastAPI, File, UploadFile, Form, Query, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, Query, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+import firebase_admin
+from firebase_admin import credentials, auth
 from typing import Literal
 import mimetypes
 import fitz
@@ -23,6 +25,10 @@ import requests
 app = FastAPI()
 
 load_dotenv()
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS_PATH"))
+    firebase_admin.initialize_app(cred)
 # === Global Variables ===
 INDEXTTS_DIR = r"F:\index\index-tts"
 PROFILE_PATH = "profiles.json"
@@ -42,6 +48,18 @@ app.add_middleware(
 job_queue = queue.Queue()
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+async def get_current_user(authorization: str | None = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+
+    id_token = authorization.split(" ", 1)[1]
+    try:
+        decoded = auth.verify_id_token(id_token)
+        # decoded has fields like: uid, email, email_verified, etc.
+        return decoded
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # === Job Processor ===
 def process_job(job):
@@ -421,8 +439,13 @@ async def generate_presentation(
     speechSpeed: Optional[str] = Form(None),
     slides: UploadFile = File(...),
     referenceAudio: Optional[UploadFile] = File(None),
-    email: str = Form(...)
+    email: str = Form(...),
+    user = Depends(get_current_user)
 ):
+    token_email = (user.get("email") or "").lower()
+    if token_email != email.lower():
+        raise HTTPException(status_code=403, detail="Email does not match authenticated user")
+
     generateScript = generateScript.lower() == "true"
     job_id = str(uuid.uuid4())
     job_dir = os.path.join(UPLOAD_DIR, job_id)
@@ -465,9 +488,13 @@ async def generate_presentation(
     return {"status": "ok", "message": f"Job queued for {email}"}
 
 @app.get("/outputs")
-def get_outputs(email: str = Query(..., description="User email from frontend")):
+def get_outputs(email: str = Query(..., description="User email from frontend"),
+                user = Depends(get_current_user)
+):
     print(f"Received request for email: {email}")
-
+    token_email = (user.get("email") or "").lower()
+    if token_email != email.lower():
+        raise HTTPException(status_code=403, detail="Email does not match authenticated user")
     script_path = os.path.join("output_images", f"{email}_script.txt")
     video_path = os.path.join("outputs", f"{email}_output.mp4")
 
@@ -499,7 +526,11 @@ def path_for(email: str, kind: Literal["script", "video"]) -> str:
 def download_file(
     email: str = Query(..., description="User email"),
     file_type: Literal["script", "video"] = Query(..., description="script|video"),
+    user = Depends(get_current_user),
 ):
+    token_email = (user.get("email") or "").lower()
+    if token_email != email.lower():
+        raise HTTPException(status_code=403, detail="Email does not match authenticated user")
     file_path = path_for(email, file_type)
     if not os.path.isfile(file_path):
         raise HTTPException(404, detail=f"{file_type.capitalize()} not found for {email}")
