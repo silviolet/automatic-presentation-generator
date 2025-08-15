@@ -110,17 +110,25 @@ export default function GeneratePage() {
       "audio/webm;codecs=opus",
       "audio/webm",
       "audio/ogg;codecs=opus",
-      "audio/mp4" // some Safari versions
+      "audio/mp4",
     ];
     for (const t of candidates) {
-      if (MediaRecorder.isTypeSupported?.(t)) return t;
+      if ((window as any).MediaRecorder?.isTypeSupported?.(t)) return t;
     }
-    return ""; // let browser pick
+    return "";
   }
 
   async function startRecording() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // add simple constraints to avoid odd devices
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      });
       streamRef.current = stream;
 
       const mimeType = getSupportedMimeType();
@@ -128,38 +136,50 @@ export default function GeneratePage() {
       mediaRecorderRef.current = mr;
 
       const chunks: BlobPart[] = [];
+      mr.onstart = () => console.log("MediaRecorder started:", mr.mimeType);
+      mr.onerror = (e) => console.error("MediaRecorder error:", e);
       mr.ondataavailable = (e) => {
+        console.log("dataavailable", e.data?.size, e.data?.type);
         if (e.data && e.data.size > 0) chunks.push(e.data);
       };
 
       mr.onstop = () => {
         const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+        console.log("Recorded blob:", { type: blob.type, size: blob.size });
+        if (blob.size === 0) {
+          console.error("Recorded blob is empty — check permissions/device.");
+          cleanupStream();
+          setRecording(false);
+          setSecondsLeft(0);
+          return;
+        }
         const ext =
-          blob.type.includes("ogg") ? "ogg" :
-          blob.type.includes("mp4") ? "m4a" : "webm";
+          blob.type.startsWith("audio/mp4") ? "m4a" :
+          blob.type.includes("ogg")        ? "ogg" : "webm";
         const file = new File([blob], `recording_${Date.now()}.${ext}`, { type: blob.type });
 
-        setReferenceAudio(file); // <-- your existing state
+        setReferenceAudio(file);
         cleanupStream();
         setRecording(false);
         setSecondsLeft(0);
       };
 
-      mr.start(); // start recording
+      // Start with timeslice so chunks flush during recording
+      mr.start(250);  // <— key change
+
       setRecording(true);
       setSecondsLeft(10);
 
-      // tick countdown
       tickTimerRef.current = window.setInterval(() => {
-        setSecondsLeft((s) => {
-          const next = s - 1;
-          return next >= 0 ? next : 0;
-        });
+        setSecondsLeft((s) => Math.max(0, s - 1));
       }, 1000);
 
-      // hard stop at 10s
+      // Hard stop: request a final chunk, then stop a tick later
       stopTimerRef.current = window.setTimeout(() => {
-        if (mr.state !== "inactive") mr.stop();
+        if (mr.state !== "inactive") {
+          try { mr.requestData(); } catch {}
+          window.setTimeout(() => { if (mr.state !== "inactive") mr.stop(); }, 100);
+        }
       }, 10_000);
     } catch (err) {
       console.error("Mic error:", err);
@@ -172,7 +192,10 @@ export default function GeneratePage() {
 
   function stopRecordingEarly() {
     const mr = mediaRecorderRef.current;
-    if (mr && mr.state !== "inactive") mr.stop();
+    if (mr && mr.state !== "inactive") {
+      try { mr.requestData(); } catch {}
+      setTimeout(() => { if (mr.state !== "inactive") mr.stop(); }, 100);
+    }
   }
 
   function cleanupStream() {
@@ -199,7 +222,7 @@ export default function GeneratePage() {
   async function download(fileType: "script" | "video") {
     if (!idToken) return;
     const url = `http://localhost:8000/download?email=${encodeURIComponent(email)}&file_type=${fileType}`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` } });
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${idToken}` }, cache: "no-store" });
     if (!res.ok) {
       console.error("Download failed:", await res.text());
       return;
@@ -303,6 +326,44 @@ export default function GeneratePage() {
     <section className="py-16 px-4 bg-blue-50">
       <div className="max-w-4xl mx-auto p-8 bg-white shadow-xl rounded-2xl border border-blue-100">
         <h1 className="text-4xl font-bold mb-6 text-center text-blue-600">Generate Presentation</h1>
+          <div className="mb-2">
+            <label className="block font-semibold mb-2">Generation Mode</label>
+            <div
+              role="tablist"
+              aria-label="Script mode"
+              className="inline-flex rounded-xl border border-gray-200 bg-white p-1 shadow-sm"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-pressed={!generateScript}
+                onClick={() => setGenerateScript(false)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition
+                  ${!generateScript
+                    ? "bg-blue-600 text-white shadow"
+                    : "text-gray-700 hover:bg-gray-50"}`}
+              >
+                Generate Presentation
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-pressed={generateScript}
+                onClick={() => setGenerateScript(true)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition
+                  ${generateScript
+                    ? "bg-blue-600 text-white shadow"
+                    : "text-gray-700 hover:bg-gray-50"}`}
+              >
+                Generate Script
+              </button>
+            </div>
+            <p className="mt-2 text-sm text-gray-500">
+              {generateScript
+                ? "Generate a lecture script from your slides."
+                : "Upload a text script. Use #ENDSLIDE# to denote slide end."}
+            </p>
+          </div>
         <form onSubmit={handleSubmit} className="space-y-6">
           {!generateScript ? (
             <div>
@@ -310,7 +371,7 @@ export default function GeneratePage() {
               <select
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
+                className="border rounded px-3 py-2 w-full hover:bg-gray-50"
               >
                 <option>F5-TTS</option>
                 {/*<option>OpenVoice</option> don't use for the time being, low quality and buggy*/}
@@ -323,7 +384,7 @@ export default function GeneratePage() {
               <select
                 value={scriptGenerator}
                 onChange={(e) => setScriptGenerator(e.target.value)}
-                className="border rounded px-3 py-2 w-full"
+                className="border rounded px-3 py-2 w-full "
               >
                 <option>Gemma</option>
                 <option>OpenAI</option>
@@ -333,50 +394,67 @@ export default function GeneratePage() {
 
           <div>
             <label className="block font-semibold mb-1">PowerPoint Slides *</label>
-            <input
-              type="file"
-              accept=".ppt,.pptx"
-              onChange={(e) => setSlides(e.target.files?.[0] || null)}
-              className="border rounded px-3 py-2 w-full"
-            />
+              <label htmlFor="slides" className="block">
+                <input
+                  id="slides"
+                  type="file"
+                  accept=".ppt,.pptx"
+                  onChange={(e) => setSlides(e.target.files?.[0] || null)}
+                  className="sr-only"
+                />
+                <div className="flex items-center justify-between border rounded px-3 py-2 cursor-pointer hover:bg-gray-50">
+                  <span className="text-gray-700 truncate">
+                    {slides ? slides.name : "Choose a file"}
+                  </span>
+                  <span className="bg-blue-600 text-white px-3 py-1 rounded">Browse</span>
+                </div>
+              </label>
           </div>
-          <div className="flex items-center">
-            <input
-              type="checkbox"
-              checked={generateScript}
-              onChange={(e) => setGenerateScript(e.target.checked)}
-              className="mr-2"
-            />
-            <label className="font-semibold">Generate Script?</label>
-          </div>
-
           {!generateScript && (
             <div>
-              <label className="block font-semibold mb-1">Script File * (Use #ENDSLIDE# to denote slide end)</label>
-              <input
-                type="file"
-                accept=".txt"
-                onChange={(e) => setScriptFile(e.target.files?.[0] || null)}
-                className="border rounded px-3 py-2 w-full"
-              />
+              <label className="block font-semibold mb-1">Script File *</label>
+              <label htmlFor="scriptFile" className="block">
+                <input
+                  id="scriptFile"
+                  type="file"
+                  accept=".txt"
+                  onChange={(e) => setScriptFile(e.target.files?.[0] || null)}
+                  className="sr-only"
+                />
+                <div className="flex items-center justify-between border rounded px-3 py-2 cursor-pointer hover:bg-gray-50">
+                  <span className="text-gray-700 truncate">
+                    {scriptFile ? scriptFile.name : "Choose a file"}
+                  </span>
+                  <span className="bg-blue-600 text-white px-3 py-1 rounded">Browse</span>
+                </div>
+              </label>
             </div>
           )}
           {!generateScript && (
             <div>
               <label className="block font-semibold mb-1">Reference Speaker Audio *</label>
               <div className="flex items-center gap-3">
+              <label htmlFor="referenceAudio" className="block w-full">
                 <input
+                  id="referenceAudio"
                   type="file"
                   accept="audio/*"
                   onChange={(e) => setReferenceAudio(e.target.files?.[0] || null)}
-                  className="border rounded px-3 py-2 w-full"
+                  className="sr-only"
                 />
+                <div className="flex items-center justify-between border rounded px-3 py-2 cursor-pointer hover:bg-gray-50">
+                  <span className="text-gray-700 truncate">
+                    {referenceAudio ? referenceAudio.name : "Choose a file"}
+                  </span>
+                  <span className="bg-blue-600 text-white px-3 py-1 rounded">Browse</span>
+                </div>
+              </label>
                 <button
                   type="button"
                   onClick={handleRecord}
-                  className={`cursor-pointer px-4 py-2 rounded text-white ${recording ? "bg-red-600 hover:bg-red-700 transition" : "bg-blue-600 hover:bg-blue-700 transition"}`}
+                  className={`cursor-pointer px-4 py-3 rounded text-white ${recording ? "bg-red-600 hover:bg-red-700 transition" : "bg-blue-600 hover:bg-blue-700 transition"}`}
                 >
-                  {recording ? `Stop (${secondsLeft || 0}s)` : "Record 10s"}
+                  {recording ? `Stop (${secondsLeft || 0}s)` : "Record"}
                 </button>
               </div>
             </div>
@@ -387,7 +465,7 @@ export default function GeneratePage() {
               <select
                 value={subtitles ? "Yes" : "No"}
                 onChange={(e) => setSubtitles(e.target.value === "Yes")}
-                className="border rounded px-3 py-2 w-full"
+                className="border rounded px-3 py-2 w-full hover:bg-gray-50"
               >
                 <option>No</option>
                 <option>Yes</option>
