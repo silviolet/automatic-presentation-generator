@@ -12,7 +12,6 @@ import mimetypes
 import fitz
 import subprocess
 import html
-import sounddevice as sd
 import torch
 from transformers import pipeline
 from openai import OpenAI
@@ -20,7 +19,6 @@ from typing import Optional
 from dotenv import load_dotenv
 import smtplib
 from email.message import EmailMessage
-import requests
 # === Init ===
 app = FastAPI()
 
