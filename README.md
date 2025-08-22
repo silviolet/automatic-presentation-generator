@@ -6,7 +6,7 @@
 3. Install **conda** on PATH (choose *Just Me* during installation to allow PATH setup)
 4. Install **ffmpeg** on PATH
 5. Install **Node.js** for Next.js (standalone binary recommended)
-6. Install **LibreOffice**
+6. Install **LibreOffice** (update the backend file in case you change the default installation path)
 
 ---
 
