@@ -55,6 +55,7 @@
    pip install PyMuPDF
    pip install -r requirements.txt
    pip install --upgrade openai
+   fastapi run testbackend.py
    ```
 
 ---
